@@ -1,0 +1,377 @@
+---
+title: "2021_Exam"
+output: html_document
+date: "2024-01-11"
+---
+
+Problem 1 – 
+-	1.1 	5 points (5/70 = 7% = 15 minutter)
+a) Load the datafile ADW.csv into R. Check the variable types and adapt if necessary. Treat "tenure", "MonthlyCharges", and "TotalCharges" as numeric. All other variables are factors.
+```{r}
+dataTel <- read.csv("ADW.csv", stringsAsFactors = TRUE, na.strings = c("","NA"))
+data1 <- read.csv("ADW.csv", stringsAsFactors = TRUE, na.strings = c("","NA"))
+#data1(Hitters)
+#data1 <- Hitters
+#View(data1)
+glimpse(data1)
+```
+
+b) Remove the customer ID variable from the dataframe.
+```{r}
+# Delete ID
+dataTel = dataTel[, -1]
+glimpse(dataTel)
+```
+
+c) Change the \No internet service" to \No" for the following columns: \OnlineSecurity", \OnlineBackup", \DeviceProtection", \TechSupport", \StreamingTV", \StreamingMovies".
+```{r}
+library(plyr)
+cols <- c(9:14)
+for(i in 1:ncol(dataTel[,cols])) {
+  dataTel[,cols][,i] <- 
+    as.factor(mapvalues(dataTel[,cols][,i],
+                        from =c("No internet service"),
+                        to=c("No")))
+}
+```
+
+d) Similarly, change \No phone service" to \No" for column \MultipleLines" and check the result.
+```{r}
+# Change "No phone service" to "No" for column "MultipleLines".
+dataTel$MultipleLines[dataTel$MultipleLines == "No phone service"] <- "No"
+levels(dataTel$MultipleLines)
+dataTel$MultipleLines <-droplevels(dataTel$MultipleLines)
+dataTel$MultipleLines
+# Levels: No Yes
+```
+
+e) Remove all observations with at least a missing predictor (11 observations)
+```{r}
+# Delete NA
+table(is.na(dataTel))
+data1 <- dataTel[complete.cases(dataTel), ]    
+```
+
+```{r}
+dim(data1)
+# [1] 7032   20
+glimpse(data1)
+```
+
+
+
+-	1.2	20 points (20/70 = 28,5% = 63 Minutter)
+In this problem, you are supposed to predict churning. Use the cleaned dataset from Problem 1.
+
+a) Discretize all the numeric variables (High/Low) using their mean as a cutoff. Note: If you are not able to do this task, consider working only with the discrete variables in the dataset.
+```{r}
+tenure01 = rep(0, length(dataTel$tenure))
+tenure01[dataTel$tenure > mean(dataTel$tenure)] = 1
+
+MonthlyCharges01 = rep(0, length(dataTel$MonthlyCharges))
+MonthlyCharges01[dataTel$MonthlyCharges > mean(dataTel$MonthlyCharges)] = 1
+
+TotalCharges01 = rep(0, length(dataTel$TotalCharges))
+TotalCharges01[dataTel$TotalCharges > mean(dataTel$TotalCharges)] = 1
+
+# Integrate them in the data and delete original          
+ADW_help_d = data.frame(dataTel[, -c(5, 18, 19)],
+                        tenure01, MonthlyCharges01, TotalCharges01)
+```
+
+```{r}
+# Set all variables as factors 
+ADW_help_d$tenure01= as.factor(ADW_help_d$tenure01)
+ADW_help_d$MonthlyCharges01= as.factor(ADW_help_d$MonthlyCharges01)
+ADW_help_d$TotalCharges01= as.factor(ADW_help_d$TotalCharges01)
+ADW_help_d$SeniorCitizen = as.factor(ADW_help_d$SeniorCitizen) #if not done before
+glimpse(ADW_help_d)
+```
+
+b) Set.seed (123) and partition the data randomly into training and testing (60/40). Consider the task of classifying the individuals as churning or not using a Naive Bayes Classifier. Discuss the output
+```{r 2.2 using NB}
+library(e1071)
+set.seed(123)         
+intrain<- createDataPartition(ADW_help_d$Churn,p=0.6,list=FALSE)
+training<- ADW_help_d[intrain,]
+testing<- ADW_help_d[-intrain,]
+
+model.nb <- naiveBayes(Churn ~ ., data = training)
+model.nb
+# Output displays prior and conditional probabilities of X given the class Y (p(X|Y).
+# They are [...](reproduce the relevant output from console).
+# Discussion: These probabilities multiplied and divided by the probability of X lead to the posterior probability according to Bayes formula, under the assumption of independence. P(Y|X) is the probability based on which the classification of observations in class 0/1 is done.  
+```
+
+```{r 2.2 using NB}
+## Model performance in the test 
+pred.prob <- predict(model.nb, newdata = testing, type = "raw")
+#pred.prob
+pred.class <- predict(model.nb, newdata = testing) 
+#pred.class
+confusionMatrix(pred.class, testing$Churn, positive = "Yes")
+library(caTools) #  ROC and AUC
+colAUC(pred.prob[,1], testing[ ,17], plotROC = TRUE) 
+## ! display the relevant output and comment
+## example: 
+
+    ## Confusion Matrix and Statistics
+                ## Reference
+    ## Prediction       No  Yes
+                 # No  1687  255
+                 # Yes  378  492
+
+          # Accuracy : 0.7749         
+          # 95% CI : (0.759, 0.7902)
+          # No Information Rate : 0.7344         
+          # P-Value [Acc > NIR] : 4.156e-07      
+          # Kappa : 0.4518         
+
+          # Mcnemar's Test P-Value : 1.240e-06      
+                                         
+#          Sensitivity : 0.6586         
+#            Specificity : 0.8169         
+#         Pos Pred Value : 0.5655         
+#         Neg Pred Value : 0.8687         
+#             Prevalence : 0.2656         
+#         Detection Rate : 0.1750         
+#   Detection Prevalence : 0.3094         
+#      Balanced Accuracy : 0.7378         
+                                         
+#       'Positive' Class : Yes
+```
+
+```{r 2.2 using caret: NOT WORKING}
+library(caret)
+# Grid = data.frame(usekernel = FALSE, laplace = 0, adjust = 1)
+model.nb1 <- train(
+     Churn ~ ., 
+     data = training, 
+     method="naive_bayes",
+     na.action = na.pass,
+     #trControl = trainControl(method = "none"),
+     trControl = trainControl(method = "cv", number = 10)
+     #tuneGrid=Grid
+     )
+```
+
+```{r 2.2 using caret: NOT WORKING}
+model.nb1
+pred.prob1 <- predict(model.nb1, newdata = testing, type = "prob")
+pred.prob1
+pred.class1 <- predict(model.nb1, newdata = testing) 
+pred.class1
+confusionMatrix(pred.class1, testing$Churn, positive = "Yes")
+colAUC(pred.prob1[,1], testing[ ,17], plotROC = TRUE) 
+# recall to report the relevant output and discuss it
+```
+
+
+c) Evaluate and discuss the model performance in term of the accuracy, errorrate, precision, recall and AUC. You discussion should also include an analysis of the importance of different indexes from a business perspective.
+```{r 2.3}
+
+```
+
+d) Using the cleaned data from Problem 1 (no discretization), perform a Linear Discriminant Analysis to predict churn as a function of all the predictors.
+Discuss the meaning of the coefficients of linear discriminant analysis in the output.
+```{r 2.4 using MASS}
+library(MASS)
+set.seed(123)         
+intrain<- createDataPartition(data1$Churn,p=0.6,list=FALSE)
+training<- data1[intrain,]
+testing<- data1[-intrain,]
+
+lda.fit1 = lda(Churn ~ ., data = training)
+lda.fit1
+plot(lda.fit1) # scores and associated probabilities separated by class
+# Discuss the meaning of the coefficients
+# Example: The coefficients of linear discriminant output provide the linear combination of the predictors that are used to form the LDA decision rule.
+# If we multiply each value of LD1 (the first linear discriminant) by the corresponding elements of the predictor variables and sum them we get a score for each respondent.
+# This score along the the prior are used to compute the posterior probability of class membership.Classification is made based on the posterior probability, with observations predicted to be in the class for which they have the highest probability.
+```
+
+```{r 2.4 using caret}
+library(caret)
+lda.fit2 = train(
+  Churn ~ ., 
+  data = training, 
+  method="lda",
+  trControl = trainControl(method = "cv", number = 10))
+lda.fit2$finalModel
+```
+
+e) Predict the class and the posterior probability in the testing sample and display the first 6 values. Assess the model by interpreting the accuracy, error rate, precision, recall, and AUC.
+```{r}
+# shown only for lda.fit1
+lda.pred = predict(lda.fit1, testing)
+head(lda.pred$class)
+# [1] No Yes Yes Yes No  No 
+head(lda.pred$posterior)
+#No        Yes
+#4  0.9627408 0.03725918
+#5  0.2363543 0.76364573
+#7  0.4304018 0.56959815
+#9  0.3786101 0.62138993
+#10 0.9839197 0.01608031
+#12 0.9388943 0.06110567
+
+confusionMatrix(lda.pred$class, testing$Churn, positive = "Yes")
+colAUC(lda.pred$posterior, testing[ ,20], plotROC = TRUE) 
+# Interpretation required
+```
+
+f) Compare the Naive Bayes and the LDA model applied before in terms of: a) assumptions and b) prediction performance.
+```{r 2.6 NOT WORKING}
+# Example of comparison based on cv-accuracy below
+summary(
+  resamples(
+    list(
+      model1 = model.nb, 
+      model2 = lda.fit1
+    )
+  )
+)$statistics$Accuracy
+# Interpretation: similar performance based on cv-accuracy criterion
+# Complete answer also consider sensitivity, specificity, precision, ROC/AUC
+```
+
+
+-	1.3	10 points (10/70 = 14% = 31 Minutter) 
+In this problem, you are supposed to predict churning. Use the cleaned dataset from Problem 1. Split the data using the first 5000 observations for training and the rest of the observations for testing.
+
+a) Run 3 different logistic regression model for predicting the probability of churning using the training data with the following predictors:
+• Model 1: constant only
+• Model 2: Model 1 + all predictors
+• Model 3: Model 2 + all first-order interactions.
+Which model has the lowest in-sample error (log-likelihood function). Why? 
+Choose a single model based on a criterion aimed at low out-of-sample risk and justify your choice.
+```{r 3.1}
+# split data 
+n <- dim(data1)[1]
+i_IN <- seq(1,5000)
+i_OUT <- seq(5000+1,n)
+
+data_IS <- data1[i_IN,]
+data_OS <- data1[i_OUT,]
+```
+
+```{r 3.1}
+# Estimation 
+m.glm1 <- glm(Churn ~1,data=data_IS,family = "binomial")
+m.glm2 <- glm(Churn ~.,data=data_IS,family = "binomial")
+m.glm3 <- glm(Churn ~.^2,data=data_IS,family = "binomial")
+
+# in-sample criteria 
+logLik(m.glm1) #Log Likelihood function
+logLik(m.glm2)
+logLik(m.glm3)
+```
+
+```{r 3.1}
+# model selection criterion 
+AIC(m.glm1)
+AIC(m.glm2)
+AIC(m.glm3)
+
+#Interpretation/Justification: 
+#Loglik increases with more regressors by construction (in-sample error). 
+#Loglik does not control for potential overfit, suggests Model 3.
+#AIC corrects for overfit 
+#AIC is an unbiased estimator of out-of-sample risk -> right criterion here
+#AIC suggest model 2 (more parsimonious, lower variance compared to Model 3)
+#potentially better out-of-sample performance.
+```
+
+
+b) Predict the churning probabilities on the test data using Model 1, 2, and 3. Evaluate the out-of-sample error (log-likelihood function). Which model performs best? Compare it to the model selected in 1. What do you conclude?
+```{r 3.2}
+# predict probabilities on test set 
+y.glm1 <- predict(m.glm1, newdata=data_OS, type = "response")
+y.glm2 <- predict(m.glm2, newdata=data_OS, type = "response")
+y.glm3 <- predict(m.glm3, newdata=data_OS, type = "response")
+
+#calculate test error 
+# Auxiliary Steps: 
+# transform test outcome to numeric to use in ll() 
+y.os <- data_OS[,"Churn"] == "Yes"
+# Define out-of-sample criteria: LL+accuracy 
+ll <- function(p,y){
+  return( sum(y*log(p) + (1-y)*log(1-p)) )
+}
+
+#calculate test error function:
+ll(y.glm1,y.os)
+ll(y.glm2,y.os)
+ll(y.glm3,y.os)
+
+# discussion 
+# Model 2 best test error. Equivalent model selection to AIC in Problem (1) in line with theory as AIC is supposed to pick low risk model on average.
+```
+
+c) Create a new data frame containing all predictors from Model 3 using all observations. Remove perfectly collinear variables. Remark: If you cannot solve this, proceed with dataset ADW_helpMain.R instead.
+Split the data gain into test and training set using the first 5000 observations for training.
+```{r 3.3}
+#setup axuliary model for x_frame 
+m.glm <- glm(Churn ~.^2,data=data1,family = "binomial")
+# generate new data objects 
+X <- as.matrix(model.matrix(m.glm)[,!is.na(m.glm$coefficients)][,-1])
+Y <- data1[,"Churn"] == "Yes"    
+
+#split newdata
+X_IS <- X[i_IN,]
+X_OUT <- X[i_OUT,]
+Y_IS <- Y[i_IN]
+```
+
+d) Using the data from 3, Create two bagging estimator using an elastic net(α = 0.5) for logistic regression with two different cross-validated tuning parameters using the 0-1 loss as loss measure in the cross-validation step. You may proceed along the following lines:
+• Create a loop over 1; : : : ; B iterations. For each b:
+• re-sample the training data with replacement,
+• estimate the elastic net using cross-validation,
+• calculate and store the classifications for the two different tuning parameter choices for each test set observation,
+• repeat until b = B,
+• calculate the majority vote for both bagging estimators over all iterations.
+Which bagged tuning method yields the highest accuracy on the test set?
+Remark: You may set B small to save computation time.
+```{r 3.4 NOT WORKING}
+library(glmnet)
+B <- 3 #B >= 2 here
+votes1 <- matrix(0,n-5000,B)
+votes2 <- votes1
+
+for (b in seq(1,B)){
+  print(b/B) #just for checking duration
+  b_IS <- sample(seq(1,5000),5000,replace = TRUE)
+  b_cv10.out = cv.glmnet(X_IS[b_IS,],Y_IS[b_IS],
+                          alpha=0.5, 
+                          nfolds = 5,
+                          family="binomial",
+                          type.measure = "class")
+```
+
+
+```{r 3.4 NOT WORKING}
+#predict
+  b_min.pred <- predict(b_cv10.out, s="lambda.min", newx = X[i_OUT,],type="response") 
+  b_1se.pred <- predict(b_cv10.out, s="lambda.1se", newx = X[i_OUT,],type="response") 
+  
+  votes1[,b] <- as.numeric(b_min.pred > 0.5)
+  votes2[,b] <- as.numeric(b_1se.pred > 0.5)
+  
+}
+
+y1.pred <- rowMeans(votes1) > 0.5
+y2.pred <- rowMeans(votes2) > 0.5
+
+c(mean(y1.pred==y.os),mean(y2.pred == y.os))
+```
+
+e) Use an ensemble of at least 3 reasonable nonlinear methods from the lecture for predicting churning. Calculate the test set accuracy. Which models receives the most weight? Hint: For binary distributions, you can specify
+family = "binomial", method = "method.NNloglik" as options in the function SuperLearner().
+```{r 3.5}
+FUCK SUPERLEARNER
+```
+
+
+
+HUSK OG AFLEVER HELE OPGAVEN I EN R-FIL = ZIP med R-FIL og relevant CSV-FIL + FLOWNUMMER OG AFLEVER BLANK PDF FIL SOM HOVED-DOKUMENT
+HVIS TID – modificer til R-fil I stedet for RMarkDown

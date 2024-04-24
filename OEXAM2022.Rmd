@@ -1,0 +1,449 @@
+---
+title: "2022_Exam"
+output: html_document
+date: "2024-01-11"
+---
+
+Problem 1 – 
+-	1.1 	5 points (5/70 = 7% = 15 minutter)
+a) Load the dataset data.csv into R. Check the variable type (e.g., factor, integer, numeric) and adapt it to the description found in the text. Delete the variable “Model” from the dataset. Set.seed(123) and split the data into training and test set (70%/30%) using a random stratified sampling based on MSRP.
+
+```{r 1a}
+library(rsample)
+data <- read.csv("data.csv", stringsAsFactors = TRUE, na.strings = c("","NA"))
+#data <- read.csv("~/Cloud/Documents/Alina Tudoran/TEACHING/Postgraduate/Machine Learning 2020-2021/ML1/2023/New lectures/4. Ch4_Classification/CASE STUDIES/Case Study Exam 2022/data.csv", stringsAsFactors=TRUE)
+str(data)
+data$Year <- factor(data$Year)
+data$Make <- factor(data$Make)
+data$Model <- NULL
+
+set.seed(123)
+split <- initial_split(data, prop = 0.7, strata = "MSRP")
+data_train  <- training(split)
+data_test   <- testing(split)
+```
+
+b)
+```{r 1b}
+library(recipes)
+data_recipe <- recipe(MSRP ~ ., data = data_train) %>%
+  step_impute_knn(all_predictors(), neighbors = 6)%>%
+  step_YeoJohnson(all_numeric(), -all_outcomes())%>%  
+  step_center(all_numeric(), -all_outcomes()) %>%
+  step_scale(all_numeric(), -all_outcomes()) %>%
+  step_dummy(all_nominal(), one_hot = FALSE) %>%
+  step_nzv(all_nominal(), all_numeric())
+prepare <- prep(data_recipe, training = data_train)
+baked_train <- bake(prepare, new_data = data_train)
+baked_test <- bake(prepare, new_data = data_test)
+
+dim(baked_train)
+dim(baked_test)
+# the number of features has increased 
+# it is expected to affect the time of model convergence
+```
+
+
+-	1.2	20 points (20/70 = 28,5% = 63 Minutter)
+a) Using the caret library, with k-fold cross-validation, and the baked data, train the following regression models to predict the log of price of the cars (MSRP): a knn-regression, an ordinary linear model regression, a principal component regression, and a partial least square regression.
+
+```{r 1.2a KNN regression model}
+library(caret)
+cv <- trainControl(
+method = "repeatedcv", 
+number = 10, 
+repeats = 1)
+        
+hyper_grid <- expand.grid(k = seq(2, 30, by = 1)) # creates a sequence of numbers starting at 2 and ending at 30, with an increment (by) of 1.
+
+cv_knn <- train(
+  log(MSRP) ~.,
+  data = baked_train, 
+  method = "knn", 
+  trControl = cv, 
+  tuneGrid = hyper_grid,
+  metric = "RMSE"
+  )
+cv_knn # it takes a few minutes to converge!
+ggplot(cv_knn)
+```
+The final value used for the model was k = 2, which implicates a RMSE= 0.03407. This is a fairly good accuracy from the CV KNN-model.
+
+```{r 1.2a KNN prediction boxcox-responsevariable}
+predictions_knn <- predict(cv_knn, baked_test)
+test_RMSE_knn = sqrt(mean((baked_test$Average.Price - predictions_knn)^2))
+test_RMSE_knn
+```
+
+```{r 1.2a OLS regression model}
+cv <- trainControl(
+method = "repeatedcv", 
+number = 10, 
+repeats = 1)
+
+cv_ols <- train(
+  log(MSRP) ~.,
+  data = baked_train, 
+  method = "lm", 
+  trControl = cv, 
+  metric = "RMSE"
+  )
+cv_ols
+```
+CV RMSE = 0.6238
+
+```{r 1.2a OLS prediction boxcox-responsevariable}
+predictions_ols <- predict(cv_ols, baked_test)
+test_RMSE_ols = sqrt(mean((baked_test$Average.Price - predictions_ols)^2))
+test_RMSE_ols
+```
+
+```{r 1.2a PCR regression model}
+set.seed(123)
+cv_pcr <- train(
+  log(MSRP) ~ ., 
+  data = baked_train, 
+  method = "pcr",
+  trControl = cv,
+  tuneLength = 50,
+  metric = "RMSE"
+)
+cv_pcr
+#cv_pcr$bestTune
+plot(cv_pcr$results$RMSE)
+```
+the best pcr model yields 37 components implicating a RMSE=0.6233. From around 16-17 components the model doesn't improve significantly. 16 Components could be used taking the modelcomplexity by having more components into account.
+
+```{r 1.2a PCR prediction boxcox responsevariable}
+predictions_pcr <- predict(cv_pcr, baked_test)
+test_RMSE_pcr = sqrt(mean((baked_test$Average.Price - predictions_pcr)^2))
+test_RMSE_pcr
+```
+
+```{r 1.2a PLS Regression model}
+set.seed(123)
+cv_pls <- train(
+  log(MSRP) ~ ., 
+  data = baked_train, 
+  method = "pls", 
+  trControl = cv, 
+  tuneLength = 50,
+  metric = "RMSE"
+)
+cv_pls
+ggplot(cv_pls)
+```
+the best pls model yields 16 components implicating a RMSE=0.6233. From 11 components the model doesn't improve significantly. 11 Components could be used taking the modelcomplexity by having more components into account.
+
+```{r 1.2a PLS prediction}
+predictions_pls <- predict(cv_pls, baked_test)
+test_RMSE_pls = sqrt(mean((baked_test$Average.Price - predictions_pls)^2))
+test_RMSE_pls
+```
+
+
+
+b) Summarize the CV-error results for all the models and select the best model
+```{r 1.2b. Summary - model evaluation}
+results <- resamples(list(
+  ols_train = cv_ols,
+  knn_train = cv_knn,
+  pcr_train = cv_pcr,
+  pls_train = cv_pls)
+  )
+summary(results)
+bwplot(results)
+dotplot(results)
+```
+The model with the lowest CV-RMSE is knn-regression having RMSE = 0.3407
+
+c) Evaluate the extent to which the best predictive model is overfitting the data.
+```{r 1.2c}
+library(Metrics)
+# if best model is pls
+predictions_train <- predict(cv_pls, baked_train) 
+rmse(log(data_train$MSRP), predictions_train)
+# train RMSE is approx. 0.62
+# compared with cv-RMSEA model, there is no sign of overfitting
+```
+
+d) Estimate the test error and conclude.
+```{r 1.2d}
+library(Metrics)
+predictions <- predict(cv_pls, baked_test) 
+rmse(log(data_test$MSRP), predictions)
+# approx 0.61
+# close to cv-RMSEA as expected
+
+predictions_pls <- predict(cv_pls, baked_test)
+test_RMSE_pls = sqrt(mean((log(baked_test$MSRP) - predictions_pls)^2))
+test_RMSE_pls
+```
+
+e) Evaluate the residuals distribution for the best predictive model. Make recommendations that may improve the model performance.
+```{r 1.2e}
+residuals_train = data_train$MSRP - exp(predictions_train)
+plot(residuals_train)
+# 3-5 outliers are visible in my current output, 
+# but it depends on the random seed)
+# Recommendation:  identifying and commenting on the outliers
+# Note: students can make other valid recommendations  
+# an example: 
+df <- data.frame(actual = data_train$MSRP, predicted = exp(predictions_train), residuals_train)
+df[which.max(df$residuals_train),] 
+#       actual predicted residuals_train
+#7967 2065902   1006846         1059056
+data_train[7967,] 
+#         Make Year            Engine.Fuel.Type Engine.HP Engine.Cylinders Transmission.Type
+#11363 Bugatti 2008 premium unleaded (required)      1001               16  AUTOMATED_MANUAL
+#         Driven_Wheels Number.of.Doors         Market.Category Vehicle.Size Vehicle.Style
+#11363 all wheel drive               2 Exotic,High-Performance      Compact         Coupe
+#       highway.MPG city.mpg Popularity    MSRP
+#11363          14        8        820 2065902
+# As a recommendation, one can delete the outlier and re-run the analysis
+```
+
+
+-	1.3	10 points (10/70 = 14% = 31 Minutter) 
+The analyst has detected multicollinearity in the dataset. (S)he decided to perform Principal Component (PC) analysis on all the numeric predictors prior to fitting the model. Next, (s)he selected a small subset of all principal components as predictors.
+
+a) Explain how the selection of PCs may have occurred.
+```{r 1.3a}
+#the selection might have occurred: 
+#(a) by minimizing the prediction error using k-fold cross-validation
+#(b) based on the proportion of variance explained 
+#(c) based on eigenvalues >1 
+#(d) elbow rule
+```
+
+b) Explain why (s)he did not select all the PCs as predictors.
+```{r 1.3b}
+#(a) the selection criteria in cross-validated RMSE was minimized for that number of PC, or
+#(b) the reduction in RMSE was so small that it does not justify the inclusion of all the variables.
+```
+
+c) Explain the consequences of selecting all the PCs when running PC regression
+```{r 1.3c}
+#c) possibly overfitting and worse performance when modeling with new data.
+```
+
+
+PROBLEM 2 – 
+-	2.1 	5 points (5/70 = 7% = 15 minutter)
+a) Load the data file data.csv into R. Remove any cars that have been listed after 2014 and drop the Year, MSRP, Make, and Model variables from the data frame. Afterwards, remove the observations that have missing entries for any variable.
+```{r}
+data0 <- read.csv("data.csv", stringsAsFactors = TRUE, header = TRUE)
+data0 <- data0[data0$Year > 2014,]
+data0 <- data0[,!colnames(data0)%in%c("Year","MSRP","Model","Make")]
+data0 <- data0[rowSums(is.na(data0)) == 0,]
+data <- data0
+```
+
+b) Transform all the remaining character variables into factors.
+```{r}
+# stringsAsFactors = TRUE in dataload
+# Solution version:
+lab.f <- c("Engine.Fuel.Type","Engine.Cylinders","Transmission.Type",
+           "Driven_Wheels","Number.of.Doors","Market.Category","Vehicle.Size","Vehicle.Style")
+for (lab in lab.f){
+  print(lab)
+  data[[lab]] <- factor(data[[lab]])
+}
+```
+
+c) Add two new variables to your data frame that are given by
+
+popular = 1 if Popularity > 3000
+0 else
+
+cylinder = 1 if Engine.Cylinders > 5
+0 else
+
+Afterwards, drop the variables Popularity and Engine.Cylinders from the data frame. What is the share of popular cars (popular = 1)?
+```{r}
+data$popular <- 1*(data0$Popularity > 3000)
+data <- data[,!colnames(data)%in%c("Popularity")] 
+#recode cylinders (alternative: add + drop)
+data[["Engine.Cylinders"]] <- factor((as.numeric(data$`Engine.Cylinders`) > 5)*1,levels = c(0,1), labels = c("below/equal 5","above 5"))
+colnames(data)[3] <- "cylinder"
+
+data <- data[,!colnames(data)%in%c("Popularity")] 
+mean(data$popular)
+```
+
+-	2.2	30 points (30/70 = 43% = 94 Minutter)
+a) Estimate a logistic regression model to predict popular. Compare its accuracy and in-sample likelihood function to a model that always predicts popular = 0 (mean prediction) and briefly interpret these results.
+```{r 2.2a}
+#logit
+mod1.logit <- glm(popular ~ .,family = binomial, data = data)
+#summary(mod1.logit)
+mod2.logit <- glm(popular ~ 1, family = binomial, data = data) #A restricted logistic model is created here, which only includes an intercept (denoted by 1). This model essentially predicts the most frequent category (max category) for all observations.
+#summary(mod2.logit)
+y_train.logit <- predict(mod1.logit,type="response")
+hist(y_train.logit,300) #300 bins for the values between 0 -> 1
+```
+```{r 2.2a}
+acc_logit <- mean((y_train.logit > 0.5) == data$popular)
+acc_logit #The accuracy of mod1.logit is calculated. Predictions above 0.5 are classified as popular (TRUE), and this is compared to the actual data.
+acc_mod2 <- mean(0 == data$popular)
+acc_mod2 #The accuracy of the restricted model (mod2.logit) is calculated. This line assumes that the model always predicts the non-popular category (0), and compares this prediction to the actual data.
+```
+
+```{r 2.2a}
+#compare LL+acc
+logLik(mod1.logit)
+logLik(mod2.logit)
+acc_logit <- mean((y_train.logit > 0.5) == data$popular)
+acc_mod2 <- mean(0 == data$popular)
+c(acc_logit,acc_mod2)
+#interpretation
+#acc of mean model = average of dependent variable by construction
+#logit better in-sample fit according to both criteria. 
+#logLik must be better for logit by construction as it is the empirical risk function and the constant model is nested by logit
+```
+
+b) Based on the model using all predictors in a), construct a predictor matrix that contains all factors recoded as binary variables. Remove the multicollinear categories. Re-estimate the first model in a) using the new predictor matrix. Do you obtain the same predictions?
+```{r 2.2b}
+x <- model.matrix(mod1.logit)[,!is.na(coefficients(mod1.logit))][,-1]
+y <- data$popular
+```
+
+c) Discuss the use of the Bayesian information criterion and jackknife model averaging for predicting popular using the predictor matrix from b).
+```{r 2.2c}
+#1)BIC is an model selection technique that picks a model with highest (posterior) probability of being the true model. Here, the predictor matrix has p = ncol(x) = 98 predictors. Thus, an exhaustive BIC selection for all models is computationally infeasible. 
+#However, for submodels, we could select with BIC weights. Example code (using only 8 regressors): 
+#df_short <- data.frame("x" = x[,1:8], "popular" = y)
+#m.BIC <- mami(df_short, outcome = "popular", model = "binomial",method = "MS.criterion", criterion = "BIC")
+
+#1) JMA generates prediction optimal combinations of linear regression models based on leave-one-out cross-validation. Exhaustive JMA is also computationally infeasible for high predictor (p > 20) dimensions even though the original data set had "only" 12 predictors. 
+#2) More importantly, JMA is only for linear models, i.e. uses an wrong (MSE) loss function for classification or low risk prediction of a binomial distribution.
+```
+
+d) Fix your random seed. Split the data into training and test set using random partitions with shares 75% (train) and 25% (test).
+```{r 2.2d}
+set.seed(1)
+n <- nrow(data) #Stores the number of rows (observations) in the dataset data into n.
+ind <- sample(seq(1,n),round(0.75*n)) #Randomly samples 75% of the indices from the dataset to create a training set. seq(1,n) generates a sequence of numbers from 1 to n (the total number of observations).
+y_train <- y[ind] #Selects the training set responses based on the indices in ind.
+x_train <-  x[ind,] #Selects the training set predictors based on the indices in ind.
+y_test <- y[!seq(1,n)%in%ind] #Selects the test set responses. !seq(1,n) %in% ind gives the indices not in ind, i.e., the remaining 25% of the data.
+x_test <- x[!seq(1,n)%in%ind,] # Selects the test set predictors in the same manner.
+df.train <- data.frame("y"=y_train,"x"=x_train)
+df.test <- data.frame("y"=y_test,"x"=x_test)
+```
+
+
+e) Estimate a logistic elastic net with alpha = 0.5 and an L2-penalized logistic regression on the training data. Select the tuning parameters by minimizing the 5-fold cross-validation error based on the likelihood function/deviance as criterion. Compare their test-set accuracy and test-set likelihood function. Which model do you prefer?
+```{r 2.2e}
+library(glmnet)
+set.seed(1)
+cv.enet <- cv.glmnet(x=x_train,
+                     y=y_train,
+                     alpha=0.5, 
+                     nfolds = 5, 
+                     type.measure = "deviance", 
+                     family = "binomial")
+
+mod1.enet <- glmnet(x_train,
+                    y_train,
+                    family = "binomial",
+                    alpha=0.5,
+                    lambda = cv.enet$lambda.min)
+
+yhat.enet <- predict(mod1.enet,
+                     newx = x_test, 
+                     type = "response") 
+
+cv.l2 <- cv.glmnet(x=x_train,
+                   y=y_train,
+                   alpha=0, 
+                   nfolds = 5,
+                   type.measure = "deviance", 
+                   family = "binomial")
+
+mod1.l2 <- glmnet(x_train,
+                  y_train,
+                  family = "binomial",
+                  alpha=0,
+                  lambda = cv.l2$lambda.min)
+
+yhat.l2 <- predict(mod1.l2,
+                   newx = x_test, 
+                   type = "response")
+plot(yhat.enet,yhat.l2)
+```
+
+```{r 2.2e}
+#test set LL (note, this potentially requires some care for the extreme p case)
+#create LL function: 
+f.loglik <- function(y,p){
+  ll <- (sum( log(p[y==1])) + sum( log(1-p[y==0]) ))/length(y)
+  return(ll)
+}
+
+#check whether 1/0 adaption is necessary (not asked)
+#min(yhat.enet[y_test == 1])
+#max(yhat.enet[y_test == 0])
+
+ll.enet <- f.loglik(y_test,yhat.enet)
+ll.l2 <- f.loglik(y_test,yhat.l2)
+c(ll.enet,ll.l2)
+```
+
+```{r}
+#test set acc
+#predictions:
+acc_enet <- mean((yhat.enet > 0.5) == y_test)
+acc_l2 <- mean((yhat.l2 > 0.5) == y_test)
+
+c(acc_enet,acc_l2)
+#interpretation:
+#enet is slightly preferred (larger likelihood and accuracy) - could depend on random seed!
+```
+
+f) Use a super learner on the training set for binary classification that combines logistic regression, elastic net, and a method that always predicts popular = 0. How much weight does each model receive? What is the test-set accuracy and likelihood? Briefly discuss the intuition behind the super learner algorithm.
+Hint: If you encounter problems, manually change the column names of the predictor matrix X required in SuperLearner() to "1","2","3",. . . . If they are still occurring, use the option “cvControl = list(V = 2)”.
+```{r}
+#install.packages("SuperLearner")
+library(SuperLearner) 
+#we choose 3 methods
+#listWrappers()
+SL.methods <- c('SL.mean','SL.glmnet', 'SL.glm')
+
+X_train <- as.data.frame(x_train)
+colnames(X_train) <- as.character(seq(1,ncol(x_train)))
+X_test <- as.data.frame(x_test)
+colnames(X_test) <- as.character(seq(1,ncol(x_train)))
+
+#note: all fold sizes V > 2 (including default = 10) are permitted:
+model.SL <- SuperLearner(Y=y_train, X=X_train, SL.library = SL.methods, 
+                         family = binomial(link = "logit"))
+#get model averaging weights 
+model.SL$coef
+#note: can depend on random seed:   
+#SL.mean_All SL.glmnet_All    SL.glm_All 
+#  0.0259362     0.4895806     0.4844832
+
+# predictions you can use predict():
+yhat.SL <- predict(model.SL, newdata = X_test, type= "response")$pred
+
+# acc
+acc_SL <- mean((yhat.SL > 0.5) == y_test)
+c(acc_SL,acc_enet,acc_l2)
+#LL
+ll.SL <- f.loglik(y_test,yhat.SL)
+c(ll.SL,ll.enet,ll.l2)
+
+#Discussion (note: can depend on random seed): 
+#Accuracy SL/enet > l2 > constant
+#LL: SL > ENET > L2 > constant. 
+#SL overall slightly preferable.
+
+#Intuition super learner: Combinations of all predicted probabilities based 
+# on k-fold CV weights that minimize CV-error 
+# (here of the binomial likelihood fct). 
+```
+
+
+HUSK OG AFLEVER HELE OPGAVEN I EN R-FIL = ZIP med R-FIL og relevant CSV-FIL + FLOWNUMMER OG AFLEVER BLANK PDF FIL SOM HOVED-DOKUMENT
+HVIS TID – modificer til R-fil I stedet for RMarkDown

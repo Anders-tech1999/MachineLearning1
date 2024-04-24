@@ -1,0 +1,341 @@
+---
+title: "InClass3_SkrinkageEstimators"
+output: html_document
+date: "2024-01-03"
+---
+
+EXERCISE SET 3 SKRINKAGE ESTIMATORS
+
+Exercise 1: Model Selection with Shrinkage Estimators in Regression Setting
+
+1. Load the “bostonBI.csv” file into R.
+(Note: This is the data file that you are familiar from In Class Exercise Set 1.)
+```{r load data1}
+data1 <- read.csv("BostonBI.csv", header = TRUE)
+Boston <- read.csv("BostonBI.csv", header = TRUE)
+#data(Hitters)
+#data1 <- Hitters
+View(data1)
+#Response: MEDV - Median value of owner-occupied homes in $1000's
+```
+
+
+2. Find the best model for predicting the median value of housing with complete subset selection using Cp and BIC. Which variables are not included in the model?
+```{r Full model - Subset Selection}
+####subset selection###
+library(leaps) #we need this package for subset selection
+##Best subset selection up to all p=13 regressors
+reg.full <- regsubsets(medv ~.,Boston, nvmax = 13)
+#summaries
+reg.sum <- summary(reg.full)
+names(reg.sum)
+#optimal model sizes p:
+which.max(reg.sum$rsq)  #leads to p=13
+which.min(reg.sum$cp)  #leads to p=11
+which.min(reg.sum$bic)  #leads to p=11
+
+#get coefficients of optimal model (p=11)
+coef(reg.full, 11)
+#we see that indus and age are not included in the selected model.
+```
+
+
+3. Repeat previous step using forward and backward selection. How do your results compare?
+```{r Forward Backward Selection}
+reg.fwd = regsubsets(medv ~., Boston, nvmax = 13, method = "forward")
+summary(reg.fwd)
+reg.bwd = regsubsets(medv ~., Boston, nvmax = 13, method = "backward")
+summary(reg.bwd)
+
+#compare (p=11 turns out to optimal model in both cases- so all optimal models coincide
+cbind(coef(reg.full,11),coef(reg.fwd,11),coef(reg.bwd,11))
+```
+
+
+4. Estimate the model for predicting the median value of housing using ridge regression along a reasonable grid of tuning parameters. Compare the coefficient estimates and the ℓ2 norm of the coefficient estimates for 3 different values in your grid of tuning parameters with that of OLS coefficient estimates.
+```{r Ridge }
+library(glmnet)
+#get data in (x,y) format (without intercept)
+X <- model.matrix(medv~., Boston)[,-1]
+y <- Boston$medv
+
+#decreasing lambda grid from 1000 to 0.01 
+l.grid <- 10^seq(3,-2,length=100)
+
+#estimate ridge regression along grid
+l2.mod <- glmnet(X,y,alpha=0,lambda = l.grid)
+
+#obtain compare lambda and coefficients and l2 norm
+gp <- c(1,50,100)
+l2.mod$lambda[gp[1]]
+l2.mod$lambda[gp[2]]
+l2.mod$lambda[gp[3]]
+```
+This is just 1, 50, 100 put into the function made in l2.mod$lamnda
+
+```{r OLS }
+#Next we compare coefficients
+#First we ols
+reg.lm<-lm(y~X, Boston)
+#Comparing coefficients of three ridge models and ols shows that coefs of lambda=0.01 
+#ridge model is very close and ridge with lambda=1000 has all coefficents close to 0.
+#These are consistent with expectations.
+round(cbind(coef(l2.mod)[,gp], coef(reg.lm)), digits=5)
+#compare ell-2 norm
+#again we see that ell 2 norm of lambda=0.01 case is very close to ols,
+#while that of lambda=1000 is close to 0.
+c(sqrt(colSums(coef(l2.mod)[ -1 , gp]^2) ), sqrt(sum(coef(reg.lm)[-1]^2)))
+
+#look at coefficients along grid.
+plot(l2.mod, xvar = "lambda")
+```
+
+
+5. Select the optimal tuning parameters for ridge regression using the following criteria:
+(i) LOOCV, (ii) 5-fold cross validation, (iii) 10-fold cross validation.
+Compare and discuss the resulting optimal parameters.
+```{r Evaluate all CV-n 5 10 folds models}
+##Now we evaluate the different cv methods to select optimal lambda
+#LOOCV using cv.glmnet
+n <- length(y)  #sample size
+cv.out<-cv.glmnet(X,y,alpha=0, nfolds = n, lambda = l.grid)
+bestlam1<-cv.out$lambda.min
+
+#now 5- and 10-fold using cv.glmnet
+set.seed(1) #set seeds for replicability as folds are random
+cv5.out = cv.glmnet(X,y,alpha=0, nfolds = 5, lambda = l.grid)
+bestlam2 =cv5.out$lambda.min
+cv10.out = cv.glmnet(X,y,alpha=0, nfolds = 10, lambda = l.grid)
+bestlam3 =cv10.out$lambda.min
+
+#we compare three obtained optimal lambda estimates
+#LOOCV is smaller (0.091) than other two (which are 0.145 and 0.163)
+c(bestlam1, bestlam2, bestlam3)
+```
+
+6. Estimate the model for predicting the median value of housing using the lasso along a reasonable grid of tuning parameters. Compare the coefficient estimates and the ℓ1 norm of the coefficient estimates for 3 different values in your grid of tuning parameters with that of OLS coefficient estimates.
+```{r Lasso on same structure as ridge}
+# Estimate lasso regression along the same grid numbers for lambda
+l1.mod <- glmnet(X,y,alpha=1,lambda = l.grid)
+
+#we pick these three coordinates in the lambda grid
+gp <- c(1,80,100)
+#actual lambda values of them are 1000, 0.1 and 0.01
+l1.mod$lambda[gp[1]]
+l1.mod$lambda[gp[2]]
+l1.mod$lambda[gp[3]]
+
+#compare coefficients with OLS
+#At lambda=1000 all coefficients are zero, at lambda=0.1 indus and age are excluded.
+cbind(coef(l1.mod)[,gp],coef(reg.lm)) 
+#compare the l1 norm of coefficients with OLS
+#again expected outcomes for ell 1 norm results
+c(colSums(abs(coef(l1.mod)[ -1 , gp]) ),sum(abs(coef(reg.lm)[-1])) )
+
+#plot coefficient path
+plot(l1.mod, xvar = "lambda")
+```
+
+
+7. Select the optimal tuning parameters for lasso using 5-fold cross-validation.
+```{r Optimal lambda Lasso}
+#obtain cross-validated lambda
+#here only 5-fold using cv.glmnet
+cvl1.out = cv.glmnet(X,y,alpha=1, nfolds = 5, lambda = l.grid)
+laml1 =cvl1.out$lambda.min #this gives 0.02
+laml1
+```
+
+8. Compare the predictions (on the whole dataset) of ridge and lasso using 5-fold crossvalidation with the predictions from using standard OLS. Interpret your results.
+```{r Comapre ridge + lasso}
+#Let's define predictions models, remember here we use training set as x.
+l2.pred <- predict(l2.mod, s=bestlam2, newx = X)
+l1.pred <- predict(l1.mod, s=laml1, newx = X)
+lm.pred <- predict(reg.lm)
+#get predictions, summary statistics of prediction of three models are very close.
+summary(l2.pred)
+summary(l1.pred)
+summary(lm.pred)
+
+#compare to OLS, correlations are 0.99
+cor(lm.pred,l2.pred)
+cor(lm.pred,l1.pred)
+```
+
+
+9. Set your random seed to 1. Split the data set into a training and a test set of length 404 and 102 respectively. Estimate ridge, lasso, elastic net (α = 0.5) and OLS on the training set. Find appropriate prediction models. Calculate their test MSE. How do they compare to OLS? And are results surprising given the size of p and n?
+```{r Random seed + ridge + lasso + elastic net}
+#we randomize all data
+sample_id <- sample(1:dim(Boston)[1],dim(Boston)[1], replace = FALSE)
+
+train_id <- sample_id[1:404]
+test_id <- sample_id[405:506]
+
+#Define training/test response and predictors
+y_test <- y[test_id]
+y_train <- y[train_id]
+x_test<-X[test_id,]
+x_train<-X[train_id,]
+```
+
+
+```{r OLS + ridge + lasso + elastic net}
+#Set space for test set mse
+mse <- matrix(0,1,4)
+colnames(mse) <- c("OLS","L2","L1","ENET")
+#OLS
+lm.high <- lm(medv~., data=Boston[train_id,])
+mse[1,"OLS"] <- mean((y_test - predict(lm.high,newdata=Boston[test_id,]))^2)
+
+
+##L2
+l2.model <- cv.glmnet(x_train,y_train,alpha=0,nfolds = 5)
+l2.lam = l2.model$lambda.min
+l2.model.pred <- predict(l2.model, s=l2.lam, newx = x_test)
+mse[1,"L2"] <- mean((y_test - l2.model.pred)^2)
+
+##L1
+l1.model <- cv.glmnet(x_train,y_train,alpha=1,nfolds = 5)
+l1.lam = l1.model$lambda.min
+l1.model.pred <- predict(l1.model, s=l1.lam, newx = x_test)
+mse[1,"L1"] <- mean((y_test - l1.model.pred)^2)
+
+##ENET
+l12.model <- cv.glmnet(x_train,y_train,alpha=0.5,nfolds = 5)
+l12.lam = l12.model$lambda.min
+l12.model.pred <- predict(l12.model, s=l12.lam, newx = x_test)
+mse[1,"ENET"] <- mean((y_test - l12.model.pred)^2)
+##Now displaying results
+mse/mse[1,1]
+
+# lasso, ridge and elastic net are all close to each other
+#and have 0.5-1% prediction gain over ols.
+#These gains are not surprising because p=13 in this example is small relative to n.
+```
+
+EXERCISE 2> SKRINKAGE ESTIMATORS IN CLASSIFICATION WITH HIGH/DIMENSIONS
+
+The purpose of this problem set is to develop a better understanding of the use of regularization techniques in classification problems. In particular, you will learn how to use regularization techniques for exploratory data analysis in a high-dimensional p > n setup using gene expression data. Moreover, it provides some practice regarding some of the different functions and options in the glmnet library.
+You have a cross-section of 240 patients admitted for therapy for lymphoma (a group of blood and lymph tumors that develop from lymphocytes). You have information on
+
+  whether the patients were alive (0) or dead (1) by the end of the sampling period in lymphstatus.txt. This is 240 × 1 dimensional outcome information set.
+
+  7399 recorded gene expressions in lymphx.txt from DNA        microarray analysis. This is 240 × 7399 dimensional       predictor information set.
+  
+Based on this, you would like to conduct an explanatory analysis which genes are relevant for survival prediction.
+
+1. Load the two data files into R and save them as matrix objects. Try to run a logistic regression for lypmhstatus using all genetic information. Does it work? Why or why not?
+
+```{r Creating matrix - Classification}
+lymphx <- read.table("lymphx.txt", quote="\"", comment.char="")
+lymphstatus <- read.table("lymphstatus.txt", quote="\"", comment.char="")
+#save data in matrix form 
+x <- as.matrix(lymphx)
+y <- as.matrix(lymphstatus)
+
+#let's try to run a logistic regression
+glm(y ~ x, family = "binomial")
+#logit model is not feasible. Indeed, we see that algorithm does not converge due to p > n 
+#Similar to ols, we can estimate logistic regression with maximum likelihood if p> n. 
+#because there will be more parameter values than corresponding moment equations set to zero.
+```
+
+
+2. Fix the random seed to 100. Estimate the cross-validation error for ℓ1 penalized logistic regression via 10–fold cross-validation with cv.glmnet. Use as loss function measure both
+i) the likelihood function (deviance)
+ii) the share of correct predictions (class).
+
+For both criteria provide a plot with the average cross-validation error cvm and error-bars cvup and cvlow for each value of the tuning parameter. Discuss the stability of tuning parameters selection using the two different measures. Which one do you prefer?
+```{r Lasso extracting lambda - Deviance + Class}
+library(glmnet)
+set.seed(100)
+alpha = 1 #for lasso
+mod1.cv <- cv.glmnet(x,
+                     y,
+                     family ="binomial",
+                     type.measure = "deviance",
+                     alpha=alpha,
+                     nfolds = 10)
+mod2.cv <- cv.glmnet(x,
+                     y,
+                     family ="binomial",
+                     type.measure = "class",
+                     alpha=alpha, 
+                     nfolds = 10)
+#to get an initial idea, let's check which lambdas produce minimizations
+mod1.cv$lambda.min #this gives 0.07
+mod2.cv$lambda.min #this gives 0.04
+```
+
+```{r}
+#Concerning plotting, simple plot of cv.glmnet object produces both average and 
+#also upper and lower bounds as a function of log lambda
+plot(mod1.cv)
+plot(mod2.cv)
+```
+
+
+```{r}
+#to be sure about the upper and lower curves, we need to it manually as requested by the task
+library(ggplot2)
+#for model 1, unlike above these plots as a function of lambda
+df1 <- data.frame("lambda" = mod1.cv$lambda,"cvm" = mod1.cv$cvm,"cvup" = mod1.cv$cvup,
+                  "cvlo" = mod1.cv$cvlo)
+ggplot(df1, aes(x=lambda)) +
+  geom_point(aes(y=cvm), color ="blue") +
+  geom_errorbar(aes(ymin = cvlo, ymax = cvup), color = "lightblue") +
+  theme_minimal()
+#for model 2
+df2 <- data.frame("lambda" = mod2.cv$lambda,"cvm" = mod2.cv$cvm,"cvup" = mod2.cv$cvup,
+                  "cvlo" = mod2.cv$cvlo)
+ggplot(df2, aes(x=lambda)) +
+  geom_point(aes(y=cvm), color ="blue") +
+  geom_errorbar(aes(ymin = cvlo, ymax = cvup), color = "lightblue") +
+  theme_minimal()
+#Both simple plot version and this ggplot clearly show deviance measure leads to stable optimum
+#class plot has a sort of zigzag pattern with unclear convergence.
+#For this reason, we continue with deviance measure.
+```
+
+
+
+3. Select the tuning parameter that is optimal in terms of deviance from 2). Estimate the ℓ1 penalized logistic regression model with this tuning parameter choice. According to your estimates, how many genes are relevant for prediction of death after lymphoma?
+```{r Lasso incl. Deviance}
+#run lasso with deviance
+#post-lasso
+#choose selected coefficients 
+#this gives us coefficients of model 1 excluding its intercept, we are looking for predictors
+mod1.coef <- predict(mod1.cv,
+                     type="coefficients",
+                     s=mod1.cv$lambda.min)[2:7400,]
+
+#now we store index of corresponding selected variables, there are 27 such variables.
+incl.lasso<-which(mod1.coef!=0)
+#store corresponding coefficients
+par.lasso<-mod1.coef[incl.lasso]
+par.lasso
+#We find that 27 genes are relevant for our prediction task. 
+#and we know which genes those are, gene # 30, 80, 773, ..., 7357.
+```
+
+
+4. Estimate a post-lasso logistic regression model. How do the coefficients and in particular their signs compare to those obtained from 3)?
+```{r Post Lasso model}
+##Exercise 2.4
+#run post-lasso and store coefficients
+mod.post.lasso <- glm(y~x[,incl.lasso],family ="binomial")
+par.post.lasso <- mod.post.lasso$coefficients[-1]
+
+#compare coefficients
+cbind(par.lasso, par.post.lasso)
+##We observe that lasso coefficients are smaller than post-lasso due to l1-shrinkage.
+```
+
+
+```{r Coef disagrees between Lasso models}
+#active coefficients + where sign disagrees
+c(length(par.lasso),sum(sign(par.lasso) != sign(par.post.lasso)))
+#We see that only 4 out of 27 gene signs disagree, and we can locate those.
+#Sign agreement is important because then both increase or decrease death of patient on average.
+#Overall, such sign disagreements are small (4/27) and this is overall good news for the models.
+```

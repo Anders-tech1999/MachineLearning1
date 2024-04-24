@@ -1,0 +1,159 @@
+---
+title: "NaiveBayes"
+output: html_document
+date: "2023-12-28"
+---
+
+```{r}
+delays.df <- read.csv("FlightDelays.csv")
+data1 <- delays.df
+str(data1)
+View(data1)
+```
+
+```{r Factorize variables}
+# DAY_WEEK as factor 
+data1$DAY_WEEK <- factor(data1$DAY_WEEK)
+table(data1$DAY_WEEK) 
+  
+# create hourly bins departure time 
+data1$CRS_DEP_TIME <- factor(round(data1$CRS_DEP_TIME/100))
+table(data1$CRS_DEP_TIME)
+  
+# ORIGIN as factor
+data1$ORIGIN <- factor(data1$ORIGIN)
+table(data1$ORIGIN)
+  
+# CARRIER as factor
+data1$CARRIER <- factor(data1$CARRIER)
+table(data1$CARRIER)
+  
+# Flight.Status as factor
+data1$Flight.Status <- as.factor(data1$Flight.Status)
+table(data1$Flight.Status)
+```
+
+```{r Variable selection}
+selected.var <- c(10, 1, 8, 4, 2, 13) #column number
+set.seed(123)
+train.index <- sample(c(1:dim(data1)[1]), dim(data1)[1]*0.6)  
+data_train <- data1[train.index, selected.var]
+data_test <- data1[-train.index, selected.var]
+```
+
+```{r Probabilities}
+library(e1071)
+nb_priors <- naiveBayes(Flight.Status ~ ., data = data_train)
+nb_priors
+```
+A-priori probabilities:
+I think it is the Outcome (truthful/fraud) probability?
+Conditional probabilities:
+eg. having DAYWEEK (1-7 variables assigned to each weekday) on Day_Week=1: delayed=0.219, ontime 0.136 assigned to each class 1 -> 7.
+
+
+```{r Specific variable probabilities}
+prop.table(table(data_train$Flight.Status, data_train$DEST), margin = 1)
+```
+
+shows the probability distribution of DEST. These are estimates of the conditional probabilities that the Naive Bayes classifier uses to calculate P(DEST|Flight.Status), which are essential for making predictions
+
+
+```{r}
+# predict probabilities test data 
+pred.prob <- predict(nb_priors, newdata = data_test, type = "raw")
+pred.prob
+# predict class membership 
+pred.class <- predict(nb_priors, newdata = data_test, type="class") 
+pred.class
+```
+
+
+```{r}
+predict_set <- data.frame(actual = data_test$Flight.Status, predicted = pred.class, pred.prob)
+predict_set
+  
+confusionMatrix(pred.class, data_test$Flight.Status, positive = "delayed")
+library(caTools) #  ROC and AUC
+colAUC(pred.prob[,1], data_test[ ,6], plotROC = TRUE)
+```
+if confusion matrix for a different cutoff is desired, see example confusionMatrix(factor(ifelse(pred.prob[, 1] > 0.2, "delayed", "ontime")), valid.df$Flight.Status, positive = "delayed")
+Checking accuracy. Is this model good enough? By classifying all as "on time", we get an accuracy of 0.7991. If we only use accuracy as a criteria, the naive Bayes model does no better than the naive benchmark rule. - WHAT DOES THIS MEAN?
+colAUC - remember to choose the right column eg. pred.prob[,1], data_test[ ,6]
+AUC is a performance metric for binary classification models. It measures the ability of a classifier to distinguish between classes and is used as part of Receiver Operating Characteristic (ROC) analysis.
+pred.prob[,1] this would typically be the probabilities of the positive class.
+data_test[ ,6] likely contains the true binary response variable against which the predictions are being compared.
+
+
+```{r 10cv }
+library(naivebayes)
+Grid = data.frame(usekernel = FALSE, laplace = 0, adjust = 1)
+nb1 <- train(
+    Flight.Status ~ ., 
+    data = data_train, 
+    method="naive_bayes",
+    trControl = trainControl(method = "cv", number = 10, classProbs = TRUE),
+     tuneGrid=Grid
+    )
+# test error
+pred.class = predict(nb1, newdata = data_test) # default is class
+confusionMatrix(pred.class, data_test$Flight.Status, positive = "delayed")
+```
+
+```{r 10cv ROC AUC}
+# predicted probabilities (predict () requires "prob" in caret)
+pred.prob1 <- predict(nb1, newdata = data_test, type = "prob")
+#pred.prob1 #not strictly necessary to print this
+colAUC(pred.prob1[,1], data_test[ ,6], plotROC = TRUE)
+```
+AUC = Area Under Curve
+
+```{r PT2 adding predictors - 10cv}
+library(caret)
+library(arules)
+#plot_bar(data1)
+#plot_histogram(data1)
+#table(data1$Weather) 
+
+#plot_histogram(data1$DISTANCE)
+data1$DISTANCE_c <- discretize(data1$DISTANCE, method = "cluster", breaks =3)
+levels(data1$DISTANCE_c)
+  
+#plot_histogram(delays.df$DEP_TIME)
+data1$DEP_TIME_c <- discretize(data1$DEP_TIME/100, breaks = 24)
+levels(data1$DEP_TIME_c)
+```
+plot_bar doesn't work?!!!
+discretize() to convert a continuous variable into a categorical one, and then it examines the levels of the resulting factor
+
+```{r PT2 Variable selection}
+selected.var <- c(10, 1, 8, 4, 2, 13, 9, 14, 15) # weather, distance, dep_time added 
+set.seed(123)
+train.index <- sample(c(1:dim(data1)[1]), dim(data1)[1]*0.6)  
+data_train2 <- data1[train.index, selected.var]
+data_test2 <- data1[-train.index, selected.var]
+```
+
+
+```{r PT2 10 cv}
+library(naivebayes)
+Grid = data.frame(usekernel = FALSE, laplace = 0, adjust = 1)
+nb2 <- train(
+    Flight.Status ~ ., 
+    data = data_train2, 
+    method="naive_bayes",
+    trControl = trainControl(method = "cv", number = 10, classProbs = TRUE),
+     tuneGrid=Grid
+    )
+# test error
+pred.class = predict(nb2, newdata = data_test2) # default is class
+confusionMatrix(pred.class, data_test2$Flight.Status, positive = "delayed")
+```
+
+
+```{r PT2 10cv ROC AUC}
+# predicted probabilities (predict () requires "prob" in caret)
+pred.prob2 <- predict(nb2, newdata = data_test2, type = "prob")
+#pred.prob1 #not strictly necessary to print this
+colAUC(pred.prob2[,1], data_test2[ ,6], plotROC = TRUE)
+```

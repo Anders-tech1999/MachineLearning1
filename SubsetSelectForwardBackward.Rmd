@@ -1,0 +1,183 @@
+---
+title: "SubsetSelection"
+output: html_document
+date: "2023-12-30"
+---
+
+```{r packages}
+#install.packages("ISLR2")
+#install.packages("glmnet")
+library(ISLR2)
+library(glmnet)
+```
+
+
+```{r load data1}
+#data1 <- read.csv("US-pumpkins.csv", header = TRUE)
+data(Hitters)
+data1 <- Hitters
+View(data1)
+```
+
+```{r Missing values}
+sum(is.na(data1$Salary))
+data1 <- na.omit(data1)
+```
+
+
+```{r SUBSET SELECTION}
+#install.packages("leaps")
+library(leaps)
+regfit.full <- regsubsets(data1$Salary ~ ., data1, nvmax = 19)
+reg.summary <- summary(regfit.full)
+reg.summary
+```
+regsubsets() function performs best subregsubsets() set selection by identifying the best model that contains a given number of predictors, where best is quantified using RSS. The syntax is the same as for lm(). The summary() command outputs the best set of variables for each model size.
+An asterisk indicates that a given variable is included in the corresponding model. For instance, this output indicates that the best two-variable model contains only Hits and CRBI. By default, regsubsets() only reports results up to the best eight-variable model.
+
+```{r Get R^2 etc.}
+#reg.summary$which
+reg.summary$rsq #R^2
+#reg.summary$rss
+#reg.summary$adjr2 
+#reg.summary$cp
+#reg.summary$bic
+#reg.summary$outmat
+#reg.summary$obj
+```
+R2 statistic increases from 32 %, when only one variable is included in the model, to almost 55 %, when all variables are included.
+Next we can use which_max and which_min (regarding the parameter) to assess which modelvariable amount is being best.
+
+```{r Plotting parameters}
+par(mfrow = c(2, 2))
+plot(reg.summary$rss, xlab = "Number of Variables",
+ylab = "RSS", type = "l")
+plot(reg.summary$adjr2 , xlab = "Number of Variables",
+ylab = "Adjusted RSq", type = "l") #type="1" connect the plotted points with lines.
+which.max(reg.summary$adjr2)
+points(8, reg.summary$adjr2[8], col = "red", cex = 2,
+pch = 20)
+```
+choose from the parameters rsq rss...
+which.max() function can be used to identify the location of the maximum point of a vector. We will now plot a red dot to indicate the model with the largest adjusted R2 statistic.
+We get the 11 input from the first command-output.
+
+```{r CP BIC}
+par(mfrow = c(2, 2))
+plot(reg.summary$cp, xlab = "Number of Variables",
+ylab = "Cp", type = "l")
+which.min(reg.summary$cp)
+points(8, reg.summary$cp[8], col = "red", cex = 2, pch = 20)
+which.min(reg.summary$bic)
+plot(reg.summary$bic , xlab = "Number of Variables", ylab = "BIC", type = "l")
+points(6, reg.summary$bic[6], col = "red", cex = 2, pch = 20)
+```
+The plot and the value-output concludes the number of variables selected.
+Eg. cp=8 variables      bic=6 variables
+
+```{r Variable selection Plots}
+plot(regfit.full, scale = "r2")
+plot(regfit.full, scale = "adjr2")
+plot(regfit.full, scale = "Cp")
+plot(regfit.full, scale = "bic")
+```
+These plots shows which variables each criteria is using to create the best possible model.
+Eg. in Hitters bic chooses 6 variables when cp is using 8 variables.
+
+```{r Coef on specific model}
+coef(regfit.full, 6)
+```
+
+```{r FORWARD SELECTION}
+regfit.fwd <- regsubsets(data1$Salary ~ ., data1, nvmax = 19, method = "forward")
+regfit.fwd.summary <- summary(regfit.fwd)
+regfit.fwd.summary
+```
+The best onevariable model contains only CRBI, and the best two-variable model additionally includes Hits.
+
+
+```{r BACKWARD SELECTION}
+regfit.bwd <- regsubsets(data1$Salary ~ ., data1, nvmax = 19, method = "backward")
+regfit.bwd.summary <- summary(regfit.bwd)
+regfit.bwd.summary
+```
+
+
+```{r Coef Forward Backward Subset}
+coef(regfit.full, 7)
+coef(regfit.fwd, 7)
+coef(regfit.bwd, 7)
+```
+
+```{r Model assessment CV}
+set.seed(1)
+data_train <- sample(c(TRUE, FALSE), nrow(data1), replace = TRUE)
+data_test <- (!data_train)
+```
+creating a random vector, train, of elements equal to TRUE if the corresponding observation is in the training set, and FALSE otherwise. The vector test has a TRUE if the observation is in the test set, and a FALSE otherwise. ! in the command to create test causes TRUEs to be switched to FALSEs and vice versa.
+
+```{r Bestsubset}
+regfit.best <- regsubsets(Salary ~ ., data = data1[data_train, ], nvmax = 19)
+test_matrix <- model.matrix(Salary ~ ., data = data1[data_test, ])
+vali.errors <- rep(NA, 19)
+for (i in 1:19) {
+coefi <- coef(regfit.best, id = i)
+pred <- test_matrix[, names(coefi)] %*% coefi
+vali.errors[i] <- mean((data1$Salary[data_test] - pred)^2)
+}
+vali.errors
+which.min(vali.errors)
+coef(regfit.best, 4) # print the output model from which_min
+```
+
+```{r Best Subset Selection}
+predict.regsubsets <- function(object, newdata, id, ...) {
+  form <- as.formula(object$call[[2]])
+  mat <- model.matrix(form, newdata)
+  coefi <- coef(object, id = id)
+  xvars <- names(coefi)
+  mat[, xvars] %*% coefi
+}
+regfit.best <- regsubsets(Salary ~ ., data = data1, nvmax = 19)
+coef(regfit.best, 4)
+```
+Finally, we perform best subset selection on the full data set, and select the best (seven)-variable model. It is important that we make use of the full data set in order to obtain more accurate coefficient estimates. Note that we perform best subset selection on the full data set and select the best seven-variable model, rather than simply using the variables that were obtained from the training set, because the best seven-variable model on the full data set may differ from the corresponding model on the training set.
+
+```{r CV-error Result vector}
+k <- 10
+n <- nrow(data1)
+set.seed(1)
+folds <- sample(rep(1:k, length = n))
+cv.errors <- matrix(NA, k, 19,
+dimnames = list(NULL, paste(1:19)))
+```
+creating a vector that allocates each observation to one of k = 10 folds, and we create a matrix in which we will store the results
+
+```{r for loop - CV}
+for (j in 1:k) {
+  best.fit <- regsubsets(Salary ~ ., data = data1[folds != j, ], nvmax = 19)
+for (i in 1:19) {
+  pred <- predict(best.fit, data1[folds == j, ], id = i)
+cv.errors[j, i] <- mean((data1$Salary[folds == j] - pred)^2)
+  }
+}
+```
+
+```{r Print CV-errors through 19 predictor models}
+mean.cv.errors<-apply(cv.errors, 2, mean)
+mean.cv.errors
+#Extracting all CV-errors from 1 until 19 predictor models
+```
+Calculate average MSE across 10 folds
+
+```{r Plotting CV-errors - get best 10-variable model}
+par(mfrow = c(1, 1))
+plot(mean.cv.errors , type = "b")
+```
+ cross-validation selects a 10-variable model. 
+
+performing best subset selection on the full data set in order to obtain the 10-variable model.
+```{r}
+reg.best <- regsubsets(Salary ~ ., data = data1, nvmax = 19)
+coef(reg.best, 10)
+```

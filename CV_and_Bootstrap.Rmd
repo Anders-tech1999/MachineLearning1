@@ -1,0 +1,166 @@
+---
+title: "5.3Lab_CV_and_Bootstrap"
+output: html_document
+date: "2023-11-10"
+---
+
+```{r}
+#install.packages("ISLR2")
+library(ISLR2)
+```
+
+###################################################################
+5.3.1 The validation set approach
+
+```{r}
+data(Auto)
+data1 <- Auto
+View(data1)
+```
+
+```{r}
+set.seed(1)
+train <- sample(392, 196) #using the sample() function to split the set of observations into two halves, by selecting a random subset of 196 observations out of the original 392 observations.
+lm.fit <- lm(mpg ~ horsepower, data = data1, subset = train)
+mean((data1$mpg - predict(lm.fit, data1))[-train]^2) # takes the validation set and calculating the TestMSE based on that.
+```
+The test MSE for the linear regression fit is 23.27
+
+```{r}
+#quadratic regression
+lm.fit2 <- lm(mpg ~ poly(horsepower, 2), data = data1, subset = train)
+mean((data1$mpg - predict(lm.fit2, data1))[-train]^2)
+#cubic regression
+lm.fit3 <- lm(mpg ~ poly(horsepower, 3), data = data1, subset = train)
+mean((data1$mpg - predict(lm.fit3, data1))[-train]^2)
+```
+The test MSE for the quadratic regression fit is 18.72 and the cubic regression is 18.80. If we choose a different training set instead, then we will obtain somewhat different errors on the validation set.
+
+```{r}
+set.seed(2) #Creating another random sampling
+train <- sample(392, 196) #using the sample() function to split the set of observations into two halves, by selecting a random subset of 196 observations out of the original 392 observations.
+lm.fit <- lm(mpg ~ horsepower, data = data1, subset = train)
+mean((data1$mpg - predict(lm.fit, data1))[-train]^2)
+#quadratic regression
+lm.fit2 <- lm(mpg ~ poly(horsepower, 2), data = data1, subset = train)
+mean((data1$mpg - predict(lm.fit2, data1))[-train]^2)
+#cubic regression
+lm.fit3 <- lm(mpg ~ poly(horsepower, 3), data = data1, subset = train)
+mean((data1$mpg - predict(lm.fit3, data1))[-train]^2)
+```
+ANSWER The test MSE for the linear regression fit is 25.73 the quadratic regression fit is 20.43 and the cubic regression is 20.39. If we choose a different training set instead, then we will obtain somewhat different errors on the validation set.
+We can look in Fig 5.2 ISLR2 to get intuition about the decreasing test MSE. It decreases from 1. polynomial to 2. polynomal. Whereas the test MSE from 3. 4. 5. is stabil.
+
+##################################################################
+5.3.2 Leave-One-Out CV LOOCV - ISLR
+
+```{r show glm and lm function}
+#generalized linear model using the glm() and cv.glm() functions. use glm() to fit a model without passing in the family argument, then it performs linear regression, just like the lm() function. 
+glm.fit <- glm(mpg ~ horsepower, data = data1)
+coef(glm.fit)
+lm.fit <- lm(mpg ~ horsepower, data = data1)
+coef(lm.fit)
+#This shows the identical output. We use glm to utilize further cv.glm later.
+```
+
+```{r}
+install.packages("boot")
+library(boot)
+```
+
+```{r}
+glm.fit <- glm(mpg ~ horsepower, data = data1)
+cv.error <- cv.glm(data1, glm.fit)
+cv.error$delta
+#Our cross-validation estimate for the test error is approximately 24.23. 
+#
+```
+
+```{r}
+cv.error2 <- rep(0, 10) #Creating vector of 10
+for (i in 1:10) {
+glm.fit <- glm(mpg ~ poly(horsepower, i), data = data1)
+cv.error2[i] <- cv.glm(data1, glm.fit)$delta[1]
+  }
+cv.error2
+```
+creating a testMSE vector having from polunomial 1 -> 10. 7th polynomial model reach the smallest testMSE
+As in Figure 5.4, we see a sharp drop in the estimated test MSE between the linear and quadratic fits, but then no clear improvement from using higher-order polynomials.
+Computation time is long because of LOOCV.
+
+##################################################################
+5.3.3 k-Fold Cross-Validation - ISLR
+
+```{r}
+set.seed(17)
+cv.error.kfold_10 <- rep(0, 10) #Creating vector of 10
+for (i in 1:10) {
+  glm.fit <- glm(mpg ~ poly(horsepower, i), data = data1)
+  cv.error.kfold_10[i] <- cv.glm(data1, glm.fit, K=10)$delta[1]
+}
+cv.error.kfold_10
+```
+Computation time is shorter than that of LOOCV. We see a sharp drop in the estimated test MSE between the linear and quadratic fits, but then no clear improvement from using higher-order polynomials.
+
+##################################################################
+5.3.4 Bootstrap - ISLR
+
+```{r Boot dataload}
+data(Portfolio)
+data2 <- Portfolio
+View(data2)
+```
+
+```{r Boot}
+alpha.fn <- function(data2, index) {
+  X <- data2$X[index]
+  Y <- data2$Y[index]
+  (var(Y)-cov(X,Y)) / (var(X)+var(Y)-2*cov(X,Y))
+}
+#This function returns, or outputs, an estimate for α indexed
+alpha.fn(data2, 1:100) #estimate α using all 100 observations
+#ANSWER [1] 0.5758321
+```
+
+```{r}
+#uses the sample() function to randomly select 100 observations from the range 1 to 100, with replacement. Constructing bootsrap dataset
+set.seed(7)
+alpha.fn(data2, sample(100, 100, replace = TRUE))
+#ANSWER [1] 0.5385326
+```
+
+```{r}
+#we produce R = 1000 bootstrap estimates for α.
+boot(data2, alpha.fn, R=1000)
+#output shows that using the original data, αˆ = 0.5758, and that the bootstrap estimate for SE(ˆ α) is 0.0905
+```
+
+```{r Boot Auto}
+boot.fn <- function(data, index)
+  + coef(lm(mpg ~ horsepower, data = data, subset = index))
+boot.fn(data1, 1:392)
+#ANSER (Intercept) horsepower
+#         39.936   -0.158
+#applied for simple function for linear regression on full dataset
+```
+
+```{r}
+#Using bootstrap estimation for linear regression
+set.seed(1)
+boot.fn(data1, sample(392, 392, replace = T))
+#(Intercept)  horsepower 
+# 40.3404517  -0.1634868 
+```
+
+```{r}
+#use the boot() function to compute the standard errors of 1,000 bootstrap estimates for the intercept and slope terms
+boot(data1, boot.fn, 1000)
+#ANSWER the bootstrap estimate for SE(βˆ0) is 0.84, and that the bootstrap estimate for SE(βˆ1) is 0.0073
+```
+
+```{r}
+# standard formulas can be used to compute the standard errors for the regression coefficients in a linear model. These can be obtained using the summary() function
+summary(lm(mpg ~ horsepower, data = data1))$coef
+#The bootstrap approach does not rely on any of these assumptions, and so it is likely giving a more accurate estimate of the standard errors of βˆ0 and βˆ1 than is the summary() function.
+#The summaru functions relies on several assumptions on p. 281, which the bootstrap does not.
+```

@@ -1,0 +1,282 @@
+---
+title: "LDA_QDA_LR"
+output: html_document
+date: "2023-12-21"
+---
+
+```{r}
+library(MASS)
+```
+
+```{r PT1 Mowers dataload}
+Mowers <- read.csv("RidingMowers.csv", stringsAsFactors = TRUE, na.strings = c("","NA"))
+data1 <- read.csv("RidingMowers.csv", stringsAsFactors = TRUE, na.strings = c("","NA"))
+View(data1)
+```
+
+```{r PT1 Discriminant output- no cv}
+library(MASS)
+da.reg_beta <- lda(data1$Ownership ~ ., data = data1)
+da.reg_beta
+```
+Prior probabilities of groups:
+Down: 0.5 is 50% of the observations corresponds to Nonowners
+Up: 0.50 is 50% of the observations corresponds to Owners
+Coefficients of linear discriminants:
+Think about the coefficients as putting or extracting impact towards the LDA-score. Relatively, Lot Size is the most important in discriminating between classes. a larger value, impacting the overall LDA-score would essentuially be a bigger value.
+
+
+```{r PT1 predict - no cv}
+predict(da.reg_beta, data1) # we get directly probabilities 
+names(predict(da.reg_beta, data1))
+predict(da.reg_beta, data1)$posterior #probabilities
+predict(da.reg_beta, data1)$x 
+```
+lda.pred:  list with three elements. The first element, class, contains LDA’s predictions about the movement of the market. The second element, posterior, is a matrix whose kth column contains the posterior probability that the corresponding observation belongs to the kth class, computed from (4.15). Finally, x contains the linear discriminants. (why so many?)
+
+```{r PT1 discriminant plot}
+par(mar = rep(2, 4))
+plot(da.reg_beta) # the plot of the linear discriminants
+```
+
+
+```{r library }
+library(dplyr)     # for data wrangling
+library(ggplot2)   # for awesome plotting
+library(rsample)   # for data splitting
+
+# Modeling packages
+library(caret)     # for logistic regression modeling
+
+# Model interpretability packages
+library(vip)       # variable importance
+```
+
+
+```{r PT2 Weekly dataload}
+library(ISLR)
+data1 <- Weekly
+View(data1)
+```
+
+
+```{r PT2 Weekly split}
+library(rsample)
+set.seed(123)
+split <- initial_split(data1, 
+  prop = 0.7, 
+  strata = "Direction")
+data_train  <- training(split)
+data_test   <- testing(split)
+
+x_train <- model.matrix(Direction ~ ., data = data_train)[, -1]
+y_train <- data_train$Direction
+
+x_test <- model.matrix(Direction ~ ., data = data_test)[, -1]
+y_test <- data_test$Direction
+```
+
+
+argument: family = binomial in order to tell R to run a logistic regression.
+We look for the smallest p-value, as this tells which variable the model estimates having the biggest amount of impact towards the responsevariable.
+In model1, Lag5 is significant towards the response, having a negative impact, if the market had a positive return 5 days ago.
+```{r PT2 LDA Multi LR Weekly (logit-model)}
+model1 <- glm(Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5 + Volume, family = "binomial", data = data_train)
+summary(model1)
+
+model2 <- glm(Direction ~ Lag2, family = "binomial", data = data_train)
+summary(model2)
+
+model3 <- glm(Direction ~ Lag2:Lag1, family = "binomial", data = data_train)
+summary(model3)
+```
+class predictions based on whether the predicted probability of a market increase is greater than or less than 0.5
+```{r PT2 Multi LR predict- modify thresh}
+glm.probs <- predict(model1, type = "response")
+glm.probs[1:10]
+contrasts(data1$Direction)
+glm.pred <- rep("Down", 1250)
+glm.pred[glm.probs > .5] = "Up"
+```
+
+
+```{r PT2 Multi LR exponential coef}
+exp(coef(model1))
+confint(model1) #original coef
+exp(confint(model1))
+```
+We use this list-summaru to assess which Multiple Regression having the best accuracy rate
+```{r PT2 Accuracy list}
+library(caret)
+library(ggplot2)
+set.seed(123)
+cv_model1 <- train(
+  Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5 + Volume, 
+  data = data_train, 
+  method = "glm",
+  family = "binomial",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+set.seed(123)
+cv_model2 <- train(
+  Direction ~ Lag2, 
+  data = data_train, 
+  method = "glm",
+  family = "binomial",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+set.seed(123)
+cv_model3 <- train(
+  Direction ~ Lag2:Lag1, 
+  data = data_train, 
+  method = "glm",
+  family = "binomial",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+# extract out of sample performance measures
+summary(
+  resamples(
+    list(
+      model1 = cv_model1, 
+      model2 = cv_model2, 
+      model3 = cv_model3
+    )
+  )
+)$statistics$Accuracy
+```
+
+```{r Confusion matrix - CV models}
+library(caret)
+pred_class <- predict(cv_model2, data_train)
+confusionMatrix(
+  data = relevel(pred_class, ref = "Up"),
+  reference = relevel(data_train$Direction, ref = "Up")
+)
+```
+
+```{r PT2 ROCcurve}
+library(dplyr)
+library(ROCR)
+# Compute predicted probabilities
+m1_prob <- predict(cv_model1, data_train, type = "prob")$Up
+m3_prob <- predict(cv_model3, data_train, type = "prob")$Up
+
+# Compute AUC metrics for cv_model1 and cv_model3
+perform1 <- prediction(m1_prob, data_train$Direction) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+perform2 <- prediction(m3_prob, data_train$Direction) %>%
+  performance(measure = "tpr", x.measure = "fpr")
+#tpr: TruePositiveRate fpr: FalsePositiveRate
+
+# Plot ROC curves for cv_model1 and cv_model3
+plot(perform1, col = "black", lty = 2)
+plot(perform2, add = TRUE, col = "blue")
+legend(0.8, 0.2, legend = c("cv_model1", "cv_model3"),
+       col = c("black", "blue"), lty = 2:1, cex = 0.6)
+```
+
+creating a train-set containing observation from 2005 and forward.
+```{r PT2 Multi LR - Splitting on Year}
+filter_train <- (data1$Year < 2005)
+filter_train_true <- data1[filter_train,]
+filter_train_false <- data1[!filter_train,]
+```
+
+```{r PT2 ISLR LDA }
+library(MASS)
+lda.fit <- lda(data1$Direction ~ Lag1 + Lag2, data = data1)
+lda.fit
+#png("lda_plot.png", width=700, height=700)
+#dev.off()
+#plot(lda.fit)
+lda.pred <- predict(lda.fit, data1)
+names(lda.pred)
+#lda.pred # this is a HUGE amount of data
+```
+Prior probabilities of groups:
+Down: 0.44 is 44% of the observations corresponds to days having a market going down.
+Up: 0.56 is 56% of the observations corresponds to days having a market going up.
+Coefficients of linear discriminants:
+Think about the coefficients as putting or extracting impact towards the LDA-score. if Lag 1 is having a large value, then the overall would from eg. Owner score -73.16 + (0.43...).... have been essentially smaller value, because that exact discriminant is being negative.
+If Lag2 had a large value, then the overall LDA-score would essentuially be bigger value.
+lda.pred:  list with three elements. The first element, class, contains LDA’s predictions about the movement of the market. The second element, posterior, is a matrix whose kth column contains the posterior probability that the corresponding observation belongs to the kth class, computed from (4.15). Finally, x contains the linear discriminants. (why so many?)
+
+```{r}
+library(caret)
+pred_class <- predict(cv_model1, data_train)
+confusionMatrix(
+  data = relevel(pred_class, ref = "Up"),
+  reference = relevel(data_train$Direction, ref = "Up")
+)
+```
+Modify the matrix and find the ROC-curve
+
+QDA is recommended if sample size is very large or if the classes do not share a common covariance matrix. We use QDA when the covariance matrix is heterogenetic within the independent variables.
+```{r QDA Quadratic Discriminant Analysis}
+library(MASS)
+qda.fit <- qda(data1$Direction ~ Lag1 + Lag2, data =data1)
+qda.fit
+```
+does not contain the coefficients of the linear discriminants, because the QDA classifier involves a quadratic, rather than a linear, function of the predictors.
+
+```{r Table Matrix glm}
+library(ISLR)
+#View(Weekly)
+library(caret)
+glm.fit = glm(Direction ~ Lag1 + Lag2 + Lag3 + Lag4 + Lag5 + Volume, data = Weekly, family = binomial)
+glm.probs = predict(glm.fit, type = "response") # predict probabilities
+#glm.probs - comes with HUGE list
+confusionMatrix(factor(ifelse(glm.probs > 0.5, "Up", "Down")), factor(Weekly$Direction), positive = "Up") 
+```
+
+```{r QDA Datasplit}
+filter_train <- (Weekly$Year < 2009)
+filter_train_true <- Weekly[filter_train,]
+filter_train_false <- Weekly[!filter_train,]
+response_holdout = Weekly$Direction[!filter_train] #response in holdout
+```
+
+```{r QDA model}
+qda.fit = qda(Direction ~ Lag2, data = Weekly, subset = filter_train)
+qda.pred = predict(qda.fit, filter_train_false) 
+qda.pred$posterior # probability
+qda.pred$class # class; default cutoff 50%
+table(qda.pred$class, response_holdout)
+```
+Accuracy (0+61)/(0+0+61+43) = 58.65%, even though it predicted Up well the whole time.
+
+```{r QDA Confusion Matrix}
+library(caret)
+confusionMatrix(factor(ifelse(qda.pred$posterior[,2] > 0.5, "Up", "Down")), 
+factor(response_holdout), positive = "Up") 
+```
+
+```{r LDA Confusion Matrix}
+lda.fit = lda(Direction ~ Lag2, data = Weekly, subset = filter_train)
+lda.pred = predict(qda.fit, filter_train_false) 
+lda.pred$posterior # probability
+lda.pred$class # class; default cutoff 50%
+table(lda.pred$class, response_holdout)
+confusionMatrix(factor(ifelse(lda.pred$posterior[,2] > 0.5, "Up", "Down")), 
+factor(response_holdout), positive = "Up") 
+```
+
+```{r KNN Confusion Matrix}
+library(class)
+attach(Weekly)
+train.X = as.matrix(Lag2[filter_train]) # IV train
+test.X = as.matrix(Lag2[!filter_train]) # IV test
+train_response = Weekly$Direction[filter_train] # DV train
+test_response = Weekly$Direction[!filter_train]
+
+set.seed(12345,"L'Ecuyer")
+knn.pred = knn(train.X, test.X, train_response, k = 1)  # k=1 (probably overfitting), try another k. 
+knn.pred # predicted class 
+table(knn.pred, test_response)
+# Accuracy (21+31)/(21+31+30+22) = 50%
+```
+The following is just trying different models with different variables and maybe interactions.
+
