@@ -3,6 +3,7 @@ title: "OLS"
 output: html_document
 date: "2023-12-03"
 ---
+OLS: Ordinary Linear Regression
 
 ```{r packages}
 # Helper packages

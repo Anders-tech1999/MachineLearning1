@@ -1,0 +1,102 @@
+---
+title: "PCA_PC_PLS"
+output: html_document
+date: "2023-12-04"
+---
+
+```{r packages}
+library(dplyr)    # for data manipulation
+library(ggplot2)  # for awesome graphics
+
+# Modeling packages
+library(caret)    # for cross-validation, etc.
+
+# Model interpretability packages
+library(vip)      # variable importance
+library(h2o)
+```
+
+```{r View data1}
+#data1 <- read.csv("US-pumpkins.csv", header = TRUE)
+data1 <- AmesHousing::make_ames()
+#data1(Hitters)
+#data1 <- Hitters
+dim(data1) 
+View(data1)
+```
+
+chr: Character vector, lgl:logical vector, dbl:Double(same as numeric) vector), 
+```{r Structure data}
+library(dplyr)    # for data manipulation
+dim(data1)
+glimpse(data1) #From tidyverse library
+#summary(data1)
+```
+Requiremtns to perform PCA
+1. Data is in tidy format per Wickham and others (2014);
+2. Any missing values in the data must be removed or imputed;
+3. Typically, the data must all be numeric values (e.g., one-hot, label, ordinal encoding categorical features);
+4. Numeric data should be standardized (e.g., centered and scaled) to make features comparable.
+
+Set a seed and randomly partition the data into training and test set (70%/30%)
+```{r Datasplit train test}
+library(rsample)
+set.seed(123)
+split <- initial_split(data1, 
+                       prop = 0.7, 
+                       strata = "Sale_Price")
+data_train  <- training(split)
+data_test   <- testing(split)
+
+x_train <- model.matrix(Sale_Price ~ ., data = data_train)[, -1]
+y_train <- data_train$Sale_Price
+
+x_test <- model.matrix(Sale_Price ~ ., data = data_test)[, -1]
+y_test <- data_test$Sale_Price
+```
+
+```{r PCR Regression}
+library(caret)
+set.seed(123)
+cv_model_pcr <- train(
+  Sale_Price ~ ., 
+  data = data_train, 
+  method = "pcr", # see method here
+  trControl = trainControl(method = "cv", number = 10),
+  preProcess = c("zv", "center", "scale"), # an integrated method for basic data preprocessing (preProcess()) within caret
+  tuneLength = 100 # tuning parameter regarding quantity of principal components
+)
+cv_model_pcr$results %>% # model with lowest RMSE
+  dplyr::filter(ncomp == pull(cv_model_pcr$bestTune))
+plot(cv_model_pcr$results$RMSE)
+```
+
+```{r PLS Regression}
+set.seed(123)
+cv_model_pls <- train(
+  Sale_Price ~ ., 
+  data = data_train, 
+  method = "pls",
+  trControl = trainControl(method = "cv", number = 10),
+  preProcess = c("zv", "center", "scale"),
+  tuneLength = 30 #using less PC in PLS
+)
+cv_model_pls$results %>%
+  dplyr::filter(ncomp == pull(cv_model_pls$bestTune))
+plot(cv_model_pls$results$RMSE)
+```
+
+```{r PLS Variable importance }
+library(vip)      # variable importance
+vip(cv_model_pls, num_features = 20, method = "model")
+#  from 100 (most important) to 0 (least important)
+```
+
+```{r Proportion of variance}
+library(dplyr)
+data1_numeric <- data_train %>% 
+  mutate(across(everything(), as.numeric))
+
+pca_out = prcomp(data1_numeric, scale=TRUE)
+summary(pca_out)
+```
