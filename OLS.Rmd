@@ -23,7 +23,7 @@ library(rsample)
 data1 <- AmesHousing::make_ames()
 #data1(Hitters)
 #data1 <- Hitters
-View(data1)
+#View(data1)
 ```
 
 chr: Character vector, lgl:logical vector, dbl:Double(same as numeric) vector), 
