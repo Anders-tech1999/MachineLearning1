@@ -1,0 +1,91 @@
+---
+title: "KNN_Regression"
+output: html_document
+date: "2023-11-29"
+---
+
+```{r packages}
+library(rsample)   # for resampling procedures
+library(caret)     # for resampling and model training # a meta-engine
+#library(lattice)   # ?
+library(tidyverse)
+```
+
+
+```{r view}
+#data1 <- read.csv("US-pumpkins.csv", header = TRUE)
+#data1(Hitters)
+#data1 <- Hitters
+data1 <- AmesHousing::make_ames()
+View(data1)
+```
+
+chr: Character vector, lgl:logical vector, dbl:Double(same as numeric) vector), fct: factor / categorical vector
+```{r structure}
+library(tidyverse)
+dim(data1)
+glimpse(data1)
+#summary(data1)
+```
+
+With a continuous response variable, stratified sampling will segment Y into quantiles and randomly sample from each. Consequently, this will help ensure a balanced representation of the response distribution in both the training and test sets.
+```{r stratify - data partioning}
+library(rsample)
+set.seed(123)
+split <- initial_split(data1, 
+                       prop = 0.7, 
+                       strata = "Sale_Price")
+data_train  <- training(split)
+data_test   <- testing(split)
+
+x_train <- model.matrix(Sale_Price ~ ., data = data_train)[, -1]
+y_train <- data_train$Sale_Price
+
+x_test <- model.matrix(Sale_Price ~ ., data = data_test)[, -1]
+y_test <- data_test$Sale_Price
+
+hist(data1$Sale_Price)
+hist(data_train$Sale_Price)
+hist(data_test$Sale_Price)
+```
+Performing a grid-search for hyperparameter k from 2 -> 25.
+```{r 10-fold cv + hyperparameter grid}
+library(caret)
+cv <- trainControl(
+method = "repeatedcv", 
+number = 10, 
+repeats = 1
+  )
+hyper_grid <- expand.grid(k = seq(2, 25, by = 1)
+  )
+knn_fit <- train(
+  Sale_Price ~ ., 
+  data = data_train, 
+  method = "knn", 
+  trControl = cv, 
+  tuneGrid = hyper_grid,
+  metric = "RMSE"
+  )
+knn_fit
+```
+
+If k is small (e.g.,k=3 ), the model will make a prediction for a given observation based on the average of the response values for the 3 observations in the training data most similar to the observation being predicted. This often results in highly variable predicted values because we are basing the prediction (in this case, an average) on a very small subset of the training data. As k gets bigger, we base our predictions on an average of a larger subset of the training data, which naturally reduces the variance in our predicted values
+
+```{r KNN RMSE-plot }
+knn_fit$resample$RMSE
+ggplot(knn_fit)
+```
+HVAD VIL DENNE LISTE AF 10 RMSE's SIGE? Det er listen fra 10 CV's
+
+```{r Test-error on Testdata}
+pred = predict(knn_fit, newdata=data_test)
+test_RMSE_knn = sqrt(mean((data_test$Sale_Price - pred)^2))
+test_RMSE_knn
+```
+
+```{r}
+pred_train = predict(knn_fit, newdata=data_train)
+train_RMSE_knn = sqrt(mean((data_train$Sale_Price - pred_train)^2))
+train_RMSE_knn
+```
+The Train-error is as expected lower than test error, but not significantly lower.
