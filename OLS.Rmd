@@ -1,0 +1,248 @@
+---
+title: "OLS"
+output: html_document
+date: "2023-12-03"
+---
+
+```{r packages}
+# Helper packages
+library(dplyr)    # for data manipulation
+library(ggplot2)  # for awesome graphics
+
+# Modeling packages
+library(caret)    # for cross-validation, etc.
+
+# Model interpretability packages
+library(vip)      # variable importance
+library(rsample)
+```
+
+
+```{r View data1}
+#data1 <- read.csv("US-pumpkins.csv", header = TRUE)
+data1 <- AmesHousing::make_ames()
+#data1(Hitters)
+#data1 <- Hitters
+View(data1)
+```
+
+chr: Character vector, lgl:logical vector, dbl:Double(same as numeric) vector), 
+```{r Structure data}
+library(dplyr)    # for data manipulation
+#str(data1)
+glimpse(data1) #From tidyverse library
+#summary(data1)
+```
+
+Set a seed and randomly partition the data into training and test set (70%/30%)
+```{r Datasplit train test}
+library(rsample)
+set.seed(123)
+split <- initial_split(data1, 
+                       prop = 0.7, 
+                       strata = "Sale_Price")
+data_train  <- training(split)
+data_test   <- testing(split)
+
+x_train <- model.matrix(Sale_Price ~ ., data = data_train)[, -1]
+y_train <- data_train$Sale_Price
+
+x_test <- model.matrix(Sale_Price ~ ., data = data_test)[, -1]
+y_test <- data_test$Sale_Price
+```
+
+```{r OLS - simple LR}
+model1 <- lm(Sale_Price ~ Gr_Liv_Area, data = data_train)
+plot(model1) 
+summary(model1) 
+  # interpret the beta as the mean selling price increases by approx 100 USD, for each additional one square foot of above ground living space.
+```
+Plot 1: the residuals exhibit a clear U-shape, providing strong indication of non-linearity. Solution: Try to run a model using a non-linear transformation of the predictor, X.
+Plot 2: the residuals exhibit some deviation from normal distribution. Solution: Explore and exclude the problematic observations; or tranform X.  
+Plot 3: the residuals exhibit some "funel shape" distribution: The magnitude of residuals tend to increase with fitted values. Non-constant variance. Solution: Check specific outliers, tranform Y using log or square-root, re-run the regression.  
+Plot 4: identify observations with high leverage. For this data, Obs. 117 could be one of them, but it does not deviate extremly and it has low std. residual so we may decide to keep it.
+
+```{r OLS simple LR - plotting variables}
+plot(data1$Sale_Price, data1$Lot_Area) 
+
+#plot(Auto$mpg, Auto$cylinders) 
+#plot(Auto$mpg, Auto$year)
+```
+
+
+```{r OLS - simple LR - RMSE + confint}
+sigma(model1)    # training RMSE (also called residual standard error)
+  ## [1] 58113.73
+sigma(model1)^2  # training MSE
+  ## [1] 3377206020
+  # confidence intervals for each coefficient
+confint(model1, level = 0.95)
+```
+
+```{r OLS simple LR - predict}
+predict(model1, data.frame(Gr_Liv_Area = 1500), interval="confidence") #just choosing random value of X/predictor
+predict (model1, data.frame(Gr_Liv_Area = 1500), interval="prediction")
+```
+The mean SalesPrice having a Ground_living_area of X=1500 square meters will be estimated = 18.439 dollars.
+The confint is narrower than predictint because "read the ISL Applied Ex.R" regarding avg. mpg of all vehicles vs. particular vehicle etc.
+
+```{r OLS - MLR Multiple Linear Regression}
+# Gr_Liv_Area and Year_Built as predictors
+model2 <- lm(Sale_Price ~ Gr_Liv_Area + Year_Built, data = data_train)
+summary(model2)
+
+# Same model with interaction
+model2_interact <- lm(Sale_Price ~ Gr_Liv_Area + Year_Built + Gr_Liv_Area:Year_Built, data = data_train)
+summary(model2_interact)
+```
+
+```{r OLS - MLR all predictors}
+# Model incl. all predictors
+model3 <- lm(Sale_Price ~ ., data = data_train) 
+# print estimated coefficients in a tidy data frame
+summary(model3)  
+```
+
+```{r OLS - MLR 10-fold CV}
+library(caret)    # for cross-validation etc.
+set.seed(123)
+(cv_model1 <- train(
+  form = Sale_Price ~ Gr_Liv_Area, 
+  data = data_train, 
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+))
+
+set.seed(123)
+cv_model2 <- train(
+  Sale_Price ~ Gr_Liv_Area + Year_Built, 
+  data = data_train, 
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+set.seed(123)
+cv_model3 <- train(
+  Sale_Price ~ ., 
+  data = data_train, 
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+# Extract out of sample performance measures
+summary(resamples(list(
+  model1 = cv_model1, 
+  model2 = cv_model2, 
+  model3 = cv_model3))
+  )
+```
+Asses which model is having the lowest RMSE
+
+Linear regression assumes a linear relationship between the predictor(s) and the response variable
+```{r OLS Assumption - Linear relations}
+plot1 <- ggplot(data_train, aes(Year_Built, Sale_Price)) + 
+  geom_point(size = 1, alpha = .4) +
+  geom_smooth(se = FALSE) +
+  scale_y_continuous("Sale price", labels = scales::dollar) +
+  xlab("Year built") +
+  ggtitle(paste("Non-transformed variables with a\n",
+                "non-linear relationship."))
+plot1
+
+# in this case, we can achieve a linear relationship by log transforming sale price
+plot1_logtrans <- ggplot(data_train, aes(Year_Built, Sale_Price)) + 
+  geom_point(size = 1, alpha = .4) + 
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_y_log10("Sale price", labels = scales::dollar, 
+                breaks = seq(0, 400000, by = 100000)) +
+  xlab("Year built") +
+  ggtitle(paste("Transforming variables can provide a\n",
+                "near-linear relationship."))
+
+gridExtra::grid.arrange(plot1, plot1_logtrans, nrow = 1)
+```
+
+```{r OLS Assumption - Constant variance}
+data_final1 <- broom::augment(cv_model1$finalModel, data = data_train) # add predicted value to each observation
+#The broom::augment function is an easy way to add model results to each observation (i.e. predicted values, residuals).
+p1 <- ggplot(data_final1, aes(.fitted, .std.resid)) + 
+  geom_point(size = 1, alpha = .4) +
+  xlab("Predicted values") +
+  ylab("Residuals") +
+  ggtitle("Model 1", subtitle = "Sale_Price ~ Gr_Liv_Area")
+
+data_final2 <- broom::augment(cv_model3$finalModel, data = data_train) # add predicted values to each observation
+p2 <- ggplot(data_final2, aes(.fitted, .std.resid)) + 
+  geom_point(size = 1, alpha = .4)  +
+  xlab("Predicted values") +
+  ylab("Residuals") +
+  ggtitle("Model 3", subtitle = "Sale_Price ~ .")
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+
+```
+model1 appears to have non-constant variance (violation of assumption) = equal to having heterschedasticity within the residuals
+model3 appears to have constant variance = equal to having homoschedasticity
+Concluding Non-constant variance can often be resolved with variable transformations or by including additional predictors (as in this case).
+
+```{r OLS Assumptions - independent errors}
+#order data by ID
+data_final1 <- mutate(data_final1, id = row_number())
+data_final2 <- mutate(data_final2, id = row_number())
+
+# plot residuals 
+p1 <- ggplot(data_final1, aes(id, .std.resid)) + 
+  geom_point(size = 1, alpha = .4) +
+  xlab("Row ID") +
+  ylab("Residuals") +
+  ggtitle("Model 1", subtitle = "Correlated residuals")
+# the residuals for homes in the same neighborhood tend to be correlated 
+
+p2 <- ggplot(data_final2, aes(id, .std.resid)) + 
+  geom_point(size = 1, alpha = .4) +
+  xlab("Row ID") +
+  ylab("Residuals") +
+  ggtitle("Model 3", subtitle = "Less correlated residuals")
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+# when introducing more predictors (model 3) the effect is reduced 
+```
+```{r OLS Assumption - Multicollinearity1}
+library(corrplot)
+selected_data <- data1[, c("Sale_Price","Garage_Area","Garage_Cars")]
+correlation_matrix <- cor(selected_data)
+correlation_matrix
+```
+Assess which variables having the possibility for high correlation - add these into the formula and remove variables if too high correlation among given variables.
+
+```{r OLS Assumption - Multicollinearity2}
+summary(cv_model3) %>%
+  broom::tidy() %>%
+  filter(term %in% c("Garage_Area", "Garage_Cars"))
+```
+
+Testing model again without Garage_Cars
+```{r OLS Assumption - Multicollinearity3}
+set.seed(123)
+model3_no_Garage_Cars <- train(
+  Sale_Price ~ ., 
+  data = select(data_train, -Garage_Cars), 
+  method = "lm",
+  trControl = trainControl(method = "cv", number = 10)
+)
+
+summary(model3_no_Garage_Cars) %>%
+  broom::tidy() %>%
+  filter(term == "Garage_Area")
+```
+p.value 1.094521e-06 number is equivalent to 0.000001094521, or approximately 1.094521 x 10^−6
+By extracting the predictor Garage_Car, we obtain a model, where Garage_area is significant towards our responsevariable Sale_Price
+
+```{r Summary list}
+summary(resamples(list(
+  model1 = cv_model1, 
+  model2 = cv_model2, 
+  model3 = cv_model3,
+  model4 = model3_no_Garage_Cars
+)))
+```
